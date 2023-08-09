@@ -22,26 +22,26 @@ class MP3Processor {
 
   /// Process the MP3 contained within the [File] instance.
   static MP3Info fromFile(File file) {
-    final bytes = file.readAsBytesSync();
+    final bytes = file.openSync().readSync(8192);
+    final length = file.statSync().size;
 
     final instance = MP3Processor();
 
-    return instance._processBytes(bytes);
+    return instance._processBytes(bytes, length);
   }
 
   /// Process the MP3 from a list of bytes
   static MP3Info fromBytes(Uint8List bytes) {
     final instance = MP3Processor();
 
-    return instance._processBytes(bytes);
+    return instance._processBytes(bytes, bytes.length);
   }
 
   /// The ID3 header is 10 bytes long with bytes 7-10 containing the length of
   /// the ID3 tag space (excluding the 10 byte header itself. This function
   /// calculates the start of the first MP3 frame.
   int _processID3(Uint8List bytes) {
-    var headerSize =
-        (bytes[6] << 21) + (bytes[7] << 14) + (bytes[8] << 7) + (bytes[9]);
+    var headerSize = (bytes[6] << 21) + (bytes[7] << 14) + (bytes[8] << 7) + (bytes[9]);
 
     return headerSize + 10;
   }
@@ -84,8 +84,8 @@ class MP3Processor {
 
   int? _processBitRate(Uint8List frameHeader, Version version, Layer layer) {
     final sampleInfo = frameHeader[frame3];
-    final bitRate = (sampleInfo & mpegBitRateMask) >>
-        4; // Easier to compare if we shift the bits down.
+    final bitRate =
+        (sampleInfo & mpegBitRateMask) >> 4; // Easier to compare if we shift the bits down.
     Map<int, int> bitRateMap;
 
     if (version == Version.MPEG_1) {
@@ -194,7 +194,7 @@ class MP3Processor {
     return e;
   }
 
-  MP3Info _processBytes(Uint8List bytes) {
+  MP3Info _processBytes(Uint8List bytes, int length) {
     var header = bytes.sublist(0, 10);
     var tag = header.sublist(0, 3);
     var firstFrameOffset = 0;
@@ -202,15 +202,14 @@ class MP3Processor {
     // Does the MP3 start with an ID3 tag?
     firstFrameOffset = latin1.decode(tag) == 'ID3' ? _processID3(header) : 0;
 
-    final frameHeaderBytes =
-        bytes.sublist(firstFrameOffset, firstFrameOffset + 10);
+    final frameHeaderBytes = bytes.sublist(firstFrameOffset, firstFrameOffset + 10);
 
     // Ensure we have a valid MP3 frame
     final frameSync1 = frameHeaderBytes[0] & frameSyncA;
     final frameSync2 = frameHeaderBytes[1] & frameSyncB;
 
     if (frameSync1 == 0xFF && frameSync2 == 0xE0) {
-      final fileSize = bytes.length - firstFrameOffset;
+      final fileSize = length - firstFrameOffset;
 
       final version = _processMpegVersion(frameHeaderBytes);
       final layer = _processMpegLayer(frameHeaderBytes);
@@ -236,8 +235,7 @@ class MP3Processor {
         emphasis,
       );
     } else {
-      throw InvalidMP3FileException(
-          'The file cannot be processed as it is not a valid MP3 file');
+      throw InvalidMP3FileException('The file cannot be processed as it is not a valid MP3 file');
     }
   }
 }
